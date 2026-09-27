@@ -164,8 +164,16 @@ int main(int argc, char* argv[]) {
     brls::getStyle().addMetric("about/padding_sides", 75);
     brls::getStyle().addMetric("about/description_margin", 50);
 
-    // Create and push the main activity to the stack if cannot run game from arguments
-    if (!startFromArgs(argc, argv)) {
+    // Normal command-line/forwarder launch still wins when present.
+    // On iOS, a plain Home Screen launch then goes directly to the saved
+    // Switch3/Qoo HOME favorite without opening Moonlight's host/app menus.
+    bool startedStreaming = startFromArgs(argc, argv);
+#if defined(PLATFORM_IOS)
+    if (!startedStreaming) {
+        startedStreaming = startSwitch3DirectLaunch();
+    }
+#endif
+    if (!startedStreaming) {
         brls::Application::pushActivity(new MainActivity());
     }
 
