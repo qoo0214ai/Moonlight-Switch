@@ -115,6 +115,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DIOS_GUI_IDENTIFIER=com.qoo.switch3 \
             -DIOS_CODE_SIGN_IDENTITY="" \
+            -DLIBROMFS_PREBUILT_GENERATOR="$GITHUB_WORKSPACE/libromfs-generator" \
             -DVCPKG_TARGET_TRIPLET=arm64-ios \
             -DVCPKG_OVERLAY_TRIPLETS="$GITHUB_WORKSPACE/extern/cmake/vcpkg-triplets"
 
