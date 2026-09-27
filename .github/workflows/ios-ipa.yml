@@ -1,0 +1,200 @@
+name: Switch3 iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - switch3-direct-launch
+    paths:
+      - "app/**"
+      - "extern/**"
+      - "CMakeLists.txt"
+      - "vcpkg.json"
+      - ".github/workflows/ios-ipa.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: switch3-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ios:
+    name: Build unsigned iOS IPA
+    runs-on: macos-15
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Show toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sw_vers
+          xcodebuild -version
+          cmake --version
+
+      - name: Fetch vcpkg history and baseline
+        shell: bash
+        run: |
+          set -euxo pipefail
+          baseline="$(sed -nE 's/.*"builtin-baseline":[[:space:]]*"([0-9a-f]{40})".*/\1/p' vcpkg.json | head -n1)"
+          test -n "$baseline"
+
+          if git -C extern/vcpkg rev-parse --is-shallow-repository | grep -q true; then
+            git -C extern/vcpkg fetch --force --prune --tags --unshallow origin \
+              "+refs/heads/*:refs/remotes/origin/*"
+          else
+            git -C extern/vcpkg fetch --force --prune --tags origin \
+              "+refs/heads/*:refs/remotes/origin/*"
+          fi
+
+          if ! git -C extern/vcpkg cat-file -e "${baseline}^{commit}" 2>/dev/null; then
+            git -C extern/vcpkg fetch --force origin "$baseline"
+          fi
+
+          git -C extern/vcpkg cat-file -e "${baseline}^{commit}"
+
+      - name: Install native build tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          brew install nasm
+          nasm -v
+
+      - name: Build libromfs generator
+        shell: bash
+        run: |
+          set -euxo pipefail
+          chmod +x build_libromfs_generator.sh
+          ./build_libromfs_generator.sh
+
+      - name: Bootstrap vcpkg
+        shell: bash
+        working-directory: extern/vcpkg
+        run: |
+          set -euxo pipefail
+          chmod +x bootstrap-vcpkg.sh
+          ./bootstrap-vcpkg.sh -disableMetrics
+
+      - name: Compute vcpkg cache key
+        id: vcpkg-cache-key
+        shell: bash
+        run: |
+          set -euxo pipefail
+          revision="$(git -C extern/vcpkg rev-parse HEAD)"
+          manifest_hash="${{ hashFiles('vcpkg.json', 'extern/cmake/vcpkg-triplets/arm64-ios.cmake') }}"
+          echo "key=iOS-arm64-vcpkg-${revision}-${manifest_hash}" >> "$GITHUB_OUTPUT"
+          echo "restore-prefix=iOS-arm64-vcpkg-${revision}-" >> "$GITHUB_OUTPUT"
+
+      - name: Restore vcpkg cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            extern/vcpkg/buildtrees
+            extern/vcpkg/downloads
+            extern/vcpkg/packages
+            build/ios/vcpkg_installed
+          key: ${{ steps.vcpkg-cache-key.outputs.key }}
+          restore-keys: |
+            ${{ steps.vcpkg-cache-key.outputs.restore-prefix }}
+
+      - name: Configure iOS device build
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake -S . -B build/ios -G Xcode \
+            -DPLATFORM_IOS=ON \
+            -DAPPLE_MOBILE_SDK_VARIANT=DEVICE \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DIOS_GUI_IDENTIFIER=com.qoo.switch3 \
+            -DIOS_CODE_SIGN_IDENTITY="" \
+            -DVCPKG_TARGET_TRIPLET=arm64-ios \
+            -DVCPKG_OVERLAY_TRIPLETS="$GITHUB_WORKSPACE/extern/cmake/vcpkg-triplets"
+
+      - name: Build iPhoneOS app without signing
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --build build/ios \
+            --config Release \
+            --target Moonlight \
+            --parallel 3 \
+            -- \
+            -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM=""
+
+      - name: Locate and validate app bundle
+        id: app
+        shell: bash
+        run: |
+          set -euxo pipefail
+          app="$(find build/ios -type d -name 'Moonlight.app' -path '*Release*iphoneos*' -print -quit)"
+          if [ -z "$app" ]; then
+            app="$(find build/ios -type d -name 'Moonlight.app' -print -quit)"
+          fi
+          test -n "$app"
+          test -f "$app/Info.plist"
+          test -x "$app/Moonlight"
+
+          plutil -lint "$app/Info.plist"
+          echo "app_path=$app" >> "$GITHUB_OUTPUT"
+          echo "Built app: $app"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Info.plist"
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euxo pipefail
+          app="${{ steps.app.outputs.app_path }}"
+
+          rm -rf dist
+          mkdir -p dist/Payload
+
+          ditto "$app" dist/Payload/Moonlight.app
+
+          # Keep the artifact deliberately unsigned. AltStore/AltServer or a
+          # signing service on Windows can apply the user's Apple ID signature.
+          rm -rf dist/Payload/Moonlight.app/_CodeSignature || true
+          rm -f dist/Payload/Moonlight.app/embedded.mobileprovision || true
+
+          (
+            cd dist
+            /usr/bin/zip -qry Switch3-unsigned.ipa Payload
+          )
+
+          shasum -a 256 dist/Switch3-unsigned.ipa | tee dist/Switch3-unsigned.ipa.sha256
+          ls -lh dist/Switch3-unsigned.ipa
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Switch3-iOS-build-logs
+          path: |
+            build/ios/vcpkg-manifest-install.log
+            build/ios/CMakeFiles/CMakeError.log
+            build/ios/CMakeFiles/CMakeOutput.log
+            extern/vcpkg/buildtrees/**/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Switch3-iOS-unsigned-IPA
+          path: |
+            dist/Switch3-unsigned.ipa
+            dist/Switch3-unsigned.ipa.sha256
+          if-no-files-found: error
+          retention-days: 14
