@@ -372,52 +372,50 @@ bool startSwitch3DirectLaunch() {
         return true;
     }
 
-    // Switch3's PC host. Match by the known LAN address first, then by
-    // hostname so DHCP/remote-address changes don't break Home Screen launch.
-    constexpr std::string_view SWITCH3_HOST_IP = "192.168.1.10";
-    constexpr std::string_view SWITCH3_HOSTNAME = "qoo";
-
+    // Find the already-saved Sunshine favorite by name instead of hard-coding
+    // a host address or app ID. This keeps direct launch working if DHCP or the
+    // Sunshine app ID changes, as long as the favorite remains saved.
     const auto hosts = Settings::instance().hosts();
-    auto hostIt = std::find_if(hosts.begin(), hosts.end(), [](const Host& host) {
-        return host.has_address(std::string(SWITCH3_HOST_IP)) ||
-               toLower(host.hostname) == SWITCH3_HOSTNAME;
-    });
 
-    if (hostIt == hosts.end()) {
-        Logger::warning(
-            "Switch3 direct launch: saved host not found (ip={} hostname={})",
-            SWITCH3_HOST_IP, SWITCH3_HOSTNAME);
-        return false;
+    const Host* matchedHost = nullptr;
+    const App* matchedApp = nullptr;
+
+    for (const auto& host : hosts) {
+        auto appIt = std::find_if(
+            host.favorites.begin(), host.favorites.end(), [](const App& app) {
+                const std::string name = toLower(app.name);
+                return name == "qoo home" ||
+                       name == "qoohome" ||
+                       name == "switch3" ||
+                       name == "switch 3";
+            });
+
+        if (appIt != host.favorites.end()) {
+            matchedHost = &host;
+            matchedApp = &(*appIt);
+            break;
+        }
     }
 
-    // The Sunshine entry may currently be named either Qoo HOME or Switch3.
-    // Resolve the real GameStream app ID from the already-saved favorite so
-    // the build does not hard-code an ID that can change.
-    auto appIt = std::find_if(
-        hostIt->favorites.begin(), hostIt->favorites.end(), [](const App& app) {
-            const std::string name = toLower(app.name);
-            return name == "qoo home" || name == "switch3";
-        });
-
-    if (appIt == hostIt->favorites.end()) {
+    if (matchedHost == nullptr || matchedApp == nullptr) {
         Logger::warning(
-            "Switch3 direct launch: Qoo HOME/Switch3 is not in Favorites");
+            "Switch3 direct launch: no saved favorite named Qoo HOME/Switch3");
         return false;
     }
 
     LaunchRequest request;
-    request.mac = hostIt->mac;
-    request.ip = hostIt->preferred_address();
-    request.appId = std::to_string(appIt->app_id);
-    request.appName = appIt->name;
+    request.mac = matchedHost->mac;
+    request.ip = matchedHost->preferred_address();
+    request.appId = std::to_string(matchedApp->app_id);
+    request.appName = matchedApp->name;
 
     Logger::info(
         "Switch3 direct launch: host={} ip={} app={} id={}",
-        hostIt->hostname, request.ip, request.appName, request.appId);
+        matchedHost->hostname, request.ip, request.appName, request.appId);
 
-    // This is an internal launch. We deliberately do NOT bounce through
-    // UIApplication.open(moonlightswitch://...), which is the path that
-    // currently produces the cold-launch half-size viewport on iPad.
+    // Internal launch: do not bounce through UIApplication.open() or the
+    // moonlightswitch:// deep-link path. That path is the one associated with
+    // the cold-launch half-size viewport on iPad.
     return startFromLaunchRequest(std::move(request), false);
 #endif
 }
