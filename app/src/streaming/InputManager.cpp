@@ -21,6 +21,36 @@ constexpr float MOONLIGHT_WHEEL_DELTA = 120.0f;
 constexpr auto DESKTOP_SCROLL_GESTURE_TIMEOUT =
     std::chrono::milliseconds(600);
 
+bool shouldSuppressControllerDerivedKeyboard(brls::BrlsKeyboardScancode key) {
+#if defined(PLATFORM_IOS)
+    // iOS 26 can expose controller UI navigation as keyboard-style presses
+    // (arrows / Select / Menu / PlayPause) in addition to the normal gamepad
+    // state. When a controller is connected, forward only the gamepad path to
+    // the streaming host so one physical press never becomes two host inputs.
+    auto* inputManager =
+        brls::Application::getPlatform()->getInputManager();
+    if (inputManager->getControllersConnectedCount() <= 0)
+        return false;
+
+    switch (key) {
+        case brls::BRLS_KBD_KEY_UP:
+        case brls::BRLS_KBD_KEY_DOWN:
+        case brls::BRLS_KBD_KEY_LEFT:
+        case brls::BRLS_KBD_KEY_RIGHT:
+        case brls::BRLS_KBD_KEY_ENTER:
+        case brls::BRLS_KBD_KEY_KP_ENTER:
+        case brls::BRLS_KBD_KEY_ESCAPE:
+        case brls::BRLS_KBD_KEY_PAUSE:
+            return true;
+        default:
+            return false;
+    }
+#else
+    (void)key;
+    return false;
+#endif
+}
+
 float applyStickScrollDeadzone(float axis, float configuredDeadzone) {
     float deadzone = std::fmax(STICK_SCROLL_DEADZONE, configuredDeadzone);
     return std::fabs(axis) < deadzone ? 0.f : axis;
@@ -67,6 +97,7 @@ MoonlightInputManager::MoonlightInputManager() {
         ->getKeyboardKeyStateChanged()
         ->subscribe([this](brls::KeyState state) {
             if (!inputEnabled) return;
+            if (shouldSuppressControllerDerivedKeyboard(state.key)) return;
 
             int vkKey = MoonlightInputManager::glfwKeyToVKKey(state.key);
             char modifiers = state.mods;
