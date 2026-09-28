@@ -20,7 +20,32 @@
             paddingLeft="@style/brls/tab_details/padding_left">
             
             <brls:Header
-                title="@i18n/streaming/input"/>
+                title="@i18n/settings/quality"/>
+
+            <brls:SelectorCell
+                id="stream_resolution"/>
+
+            <brls:SelectorCell
+                id="stream_fps"/>
+
+            <brls:SelectorCell
+                id="stream_codec"/>
+
+            <brls:Header
+                id="stream_bitrate_header"
+                title="@i18n/settings/video_bitrate"
+                subtitle=""
+                paddingTop="60"/>
+
+            <brls:Slider
+                id="stream_bitrate_slider"
+                width="auto"
+                height="84"
+                grow="1"/>
+
+            <brls:Header
+                title="@i18n/streaming/input"
+                paddingTop="60"/>
             
             <brls:DetailCell
                 id="input_overlay"/>

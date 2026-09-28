@@ -52,6 +52,12 @@ class OptionsTab : public brls::Box {
     static NVGcolor getColorFromButtons(const std::vector<brls::ControllerButton>& buttons);
     void setupButtonsSelectorCell(brls::DetailCell* cell, const std::vector<brls::ControllerButton>& buttons);
 
+    BRLS_BIND(brls::SelectorCell, streamResolution, "stream_resolution");
+    BRLS_BIND(brls::SelectorCell, streamFps, "stream_fps");
+    BRLS_BIND(brls::SelectorCell, streamCodec, "stream_codec");
+    BRLS_BIND(brls::Header, streamBitrateHeader, "stream_bitrate_header");
+    BRLS_BIND(brls::Slider, streamBitrateSlider, "stream_bitrate_slider");
+
     BRLS_BIND(brls::DetailCell, inputOverlayButton, "input_overlay");
     BRLS_BIND(brls::SelectorCell, keyboardType, "keyboard_type");
     BRLS_BIND(brls::SelectorCell, keyboardFingers, "keyboard_fingers");

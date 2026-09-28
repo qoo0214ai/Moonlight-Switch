@@ -114,6 +114,136 @@ LogoutTab::LogoutTab(StreamingView* streamView) : streamView(streamView) {
 OptionsTab::OptionsTab(StreamingView* streamView) : streamView(streamView) {
     this->inflateFromXMLRes("xml/views/ingame_overlay/options_tab.xml");
 
+    // Switch3 direct launch intentionally skips Moonlight's normal main menu.
+    // Keep the core stream-quality controls reachable from the in-game overlay
+    // so resolution/FPS/codec/bitrate can still be changed without reinstalling.
+    std::vector<std::string> resolutions = {
+        "settings/resolution_native"_i18n, "360p", "480p", "540p", "720p",
+        "1080p",
+#if !defined(__PSV__)
+        "1440p",
+#endif
+    };
+    streamResolution->setText("settings/resolution"_i18n);
+    streamResolution->setData(resolutions);
+    switch (Settings::instance().resolution()) {
+        GET_SETTINGS(streamResolution, -1, 0)
+        GET_SETTINGS(streamResolution, 360, 1)
+        GET_SETTINGS(streamResolution, 480, 2)
+        GET_SETTINGS(streamResolution, 540, 3)
+        GET_SETTINGS(streamResolution, 720, 4)
+        GET_SETTINGS(streamResolution, 1080, 5)
+#if !defined(__PSV__)
+        GET_SETTINGS(streamResolution, 1440, 6)
+#endif
+        DEFAULT
+    }
+    streamResolution->getEvent()->subscribe([](int selected) {
+        switch (selected) {
+            SET_SETTING(0, set_resolution(-1))
+            SET_SETTING(1, set_resolution(360))
+            SET_SETTING(2, set_resolution(480))
+            SET_SETTING(3, set_resolution(540))
+            SET_SETTING(4, set_resolution(720))
+            SET_SETTING(5, set_resolution(1080))
+#if !defined(__PSV__)
+            SET_SETTING(6, set_resolution(1440))
+#endif
+            DEFAULT
+        }
+    });
+
+#if defined(__PSV__)
+    std::vector<std::string> fpss = {"24", "30", "40", "50", "60"};
+#else
+    std::vector<std::string> fpss = {"30", "40", "60", "120"};
+#endif
+    streamFps->setText("settings/fps"_i18n);
+    streamFps->setData(fpss);
+    switch (Settings::instance().fps()) {
+#if defined(__PSV__)
+        GET_SETTINGS(streamFps, 24, 0)
+        GET_SETTINGS(streamFps, 30, 1)
+        GET_SETTINGS(streamFps, 40, 2)
+        GET_SETTINGS(streamFps, 50, 3)
+        GET_SETTINGS(streamFps, 60, 4)
+#else
+        GET_SETTINGS(streamFps, 30, 0)
+        GET_SETTINGS(streamFps, 40, 1)
+        GET_SETTINGS(streamFps, 60, 2)
+        GET_SETTINGS(streamFps, 120, 3)
+#endif
+        DEFAULT
+    }
+    streamFps->getEvent()->subscribe([](int selected) {
+        switch (selected) {
+#if defined(__PSV__)
+            SET_SETTING(0, set_fps(24))
+            SET_SETTING(1, set_fps(30))
+            SET_SETTING(2, set_fps(40))
+            SET_SETTING(3, set_fps(50))
+            SET_SETTING(4, set_fps(60))
+#else
+            SET_SETTING(0, set_fps(30))
+            SET_SETTING(1, set_fps(40))
+            SET_SETTING(2, set_fps(60))
+            SET_SETTING(3, set_fps(120))
+#endif
+            DEFAULT
+        }
+    });
+
+    std::vector<VideoCodec> supportedCodecs = {
+        H264,
+#if !defined(__PSV__)
+        H265,
+#endif
+    };
+    std::vector<std::string> supportedCodecNames;
+    int selectedCodec = 0;
+    for (int i = 0; i < (int)supportedCodecs.size(); i++) {
+        supportedCodecNames.push_back(getVideoCodecName(supportedCodecs[i]));
+        if (supportedCodecs[i] == Settings::instance().video_codec())
+            selectedCodec = i;
+    }
+    streamCodec->init(
+        "settings/video_codec"_i18n, supportedCodecNames, selectedCodec,
+        [supportedCodecs](int selected) {
+            if (selected >= 0 && selected < (int)supportedCodecs.size())
+                Settings::instance().set_video_codec(supportedCodecs[selected]);
+        });
+
+#if defined(__PSV__)
+    const float streamBitrateMax = 20000;
+#elif defined(PLATFORM_SWITCH)
+    const float streamBitrateMax = 100000;
+#else
+    const float streamBitrateMax = 150000;
+#endif
+    const float streamBitrateOffset = 500;
+    const float streamBitrateLimit = streamBitrateMax - streamBitrateOffset;
+
+    auto updateStreamBitrateSubtitle = [this](int bitrate) {
+        std::stringstream stream;
+        stream << std::fixed << std::setprecision(1)
+               << (bitrate / 1000.0f);
+        streamBitrateHeader->setSubtitle(stream.str() + " Mbps");
+    };
+
+    float streamBitrateProgress =
+        (Settings::instance().bitrate() - streamBitrateOffset) /
+        streamBitrateLimit;
+    streamBitrateSlider->getProgressEvent()->subscribe(
+        [this, streamBitrateOffset, streamBitrateLimit,
+         updateStreamBitrateSubtitle](float progress) {
+            int bitrate =
+                progress * streamBitrateLimit + streamBitrateOffset;
+            Settings::instance().set_bitrate(bitrate);
+            updateStreamBitrateSubtitle(bitrate);
+        });
+    streamBitrateSlider->setProgress(streamBitrateProgress);
+    updateStreamBitrateSubtitle(Settings::instance().bitrate());
+
     guideKeyButtons->setText("settings/guide_key_buttons"_i18n);
     setupButtonsSelectorCell(guideKeyButtons,
                              Settings::instance().guide_key_options().buttons);
