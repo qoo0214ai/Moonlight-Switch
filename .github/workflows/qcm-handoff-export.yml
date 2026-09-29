@@ -1,0 +1,35 @@
+name: QCM Handoff Source Export
+
+on:
+  push:
+    branches:
+      - qcm-handoff-export-g2-20260929
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exporter branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Materialize exact Switch3 source baseline
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git checkout --detach db99800e59ae5343bfe98cf0b10a607311cb72c3
+          git submodule update --init --recursive
+          printf '%s\n' 'db99800e59ae5343bfe98cf0b10a607311cb72c3' > QCM_BASELINE_COMMIT.txt
+          tar --exclude='.git' --exclude='*/.git' -czf ../Switch3_Moonlight_Source_db99800_G2.tar.gz .
+
+      - name: Upload source baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: Switch3-Moonlight-Source-db99800-G2
+          path: ../Switch3_Moonlight_Source_db99800_G2.tar.gz
+          retention-days: 1
